@@ -53,7 +53,8 @@ def main():
 
     # Run the game for X hands
     for hand_number in range(500):
-        print(f"Starting Hand {hand_number + 1}")
+        if hand_number % 50 == 0:
+            print(f"Hand {hand_number + 1}")
 
         # Start the hand
         game.start_hand()
@@ -96,7 +97,7 @@ def main():
 
                     # Limit the number of raises per player
                     if raise_counter[current_player] >= 2:
-                        print(f"Player {current_player} has already raised twice, limiting to CALL or CHECK.")
+                        # print(f"Player {current_player} has already raised twice, limiting to CALL or CHECK.")
                         # Check the player's state: if IN, allow CHECK, else CALL
                         if game.players[current_player].state == PlayerState.IN:
                             action_type = ActionType.CHECK
@@ -107,7 +108,7 @@ def main():
 
                     raise_counter[current_player] += 1
 
-                    print(f"Player {current_player} decided to {action_type.name} with total: {total}")
+                    # print(f"Player {current_player} decided to {action_type.name} with total: {total}")
                     game.take_action(action_type, total=total)
 
                 else:
@@ -143,11 +144,11 @@ def main():
         game.deck.shuffle()
         game.board = []  # Clear the board
 
-    # Save all game data to CSV at the end
-    df = pd.DataFrame(all_game_data)
+    # Save all game data to CSV at the end with a date-time stamp in filename
+    game_data_df = pd.DataFrame(all_game_data)
     os.makedirs("data", exist_ok=True)
-    df.to_csv(
-        "data/game_log.csv",
+    game_data_df.to_csv(
+        f"data/game_data_{pd.Timestamp.now()}.csv",
         mode="a",
         header=not os.path.exists("data/game_log.csv"),
         index=False,
@@ -163,4 +164,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    for _ in range(5):
+        main()

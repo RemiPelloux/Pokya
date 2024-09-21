@@ -75,7 +75,16 @@ def visualize_game_log(file_path):
     plt.show()
 
 
-# Call this with the path to your game log file
+# show every csv file in the data folder
+def show_all_csv_files():
+    # show number associated with the file you want to visualize and pass it to visualize_game_log, we are already inside the data folder
+    import os
+    for i, file in enumerate(os.listdir()):
+        if file.endswith(".csv"):
+            print(f"{i}: {file}")
+    file_number = int(input("Enter the number associated with the file you want to visualize: "))
+    visualize_game_log(os.listdir()[file_number])
+
+
 if __name__ == "__main__":
-    file_path = "game_log.csv"  # Change this to your CSV path
-    visualize_game_log(file_path)
+    show_all_csv_files()
