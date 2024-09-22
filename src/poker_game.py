@@ -164,5 +164,4 @@ def main():
 
 
 if __name__ == "__main__":
-    for _ in range(5):
-        main()
+    main()

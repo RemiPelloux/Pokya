@@ -95,34 +95,57 @@ class AIAdvisor:
         return action_type, action_params
 
     def preflop_strategy(self):
-        # Get the hand strength using pre-flop hand ranking
-        hand_strength = self.preflop_hand_strength(self.game.get_hand(self.player_id))
+        hand = self.game.get_hand(self.player_id)
+        position = self.get_player_position()
 
-        if hand_strength > 0.8:
-            return ActionType.RAISE, {"amount": self.game.big_blind * 4}
-        elif hand_strength > 0.5:
-            return ActionType.CALL, {}
-        else:
-            # Consider bluffing with weak hands
-            if random.random() < self.bluffing_probability:
+        # Calculate hand strength using pre-flop hand ranking
+        hand_strength = self.preflop_hand_strength(hand)
+        premium_hands = hand_strength > 0.8
+        medium_hands = 0.5 < hand_strength <= 0.8
+
+        # Early position requires stronger hands
+        if position < self.game.max_players // 2:  # Early position
+            if premium_hands:
+                return ActionType.RAISE, {"amount": self.game.big_blind * 4}
+            else:
+                return ActionType.FOLD, {}
+
+        # Late position can play speculative hands
+        elif position >= self.game.max_players // 2:  # Late position
+            if premium_hands:
+                return ActionType.RAISE, {"amount": self.game.big_blind * 4}
+            elif medium_hands or random.random() < self.bluffing_probability:
                 return ActionType.RAISE, {"amount": self.game.big_blind * 3}
-            return ActionType.FOLD, {}
+            else:
+                return ActionType.FOLD, {}
+
+        # Default action: fold weak hands in early positions
+        return ActionType.FOLD, {}
+
+    def should_bluff(self, board):
+        # Simple bluffing logic: bluff if the board is weak (e.g., low cards)
+        if all(card.rank <= 7 for card in board):
+            return True
+        return False
 
     def postflop_strategy(self):
-        # Evaluate hand strength post-flop using Monte Carlo simulations
         hand = self.game.get_hand(self.player_id)
         board = self.game.board
         hand_strength = self.monte_carlo_simulation(hand, board)
 
+        # If the hand is strong, raise aggressively
         if hand_strength > 0.7:
             return ActionType.RAISE, {"amount": self.game.big_blind * 4}
+
+        # If the hand is moderately strong, call
         elif hand_strength > 0.5:
             return ActionType.CALL, {}
-        else:
-            # Consider bluffing with weak hands
-            if random.random() < self.bluffing_probability:
-                return ActionType.RAISE, {"amount": self.game.big_blind * 3}
-            return ActionType.FOLD, {}
+
+        # Bluff selectively if the hand is weak and the board is weak
+        if self.should_bluff(board):
+            return ActionType.RAISE, {"amount": self.game.big_blind * 3}
+
+        return ActionType.FOLD, {}
 
     def assign_rewards(self, action_type, hand, outcome, pot_size):
         """
@@ -144,37 +167,31 @@ class AIAdvisor:
         return self.preflop_hand_strength(hand) < 0.5
 
     def rl_action(self):
-        # Prepare game state as input tensor
         state = self.get_game_state()
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)  # Add batch dimension
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
 
-        # Epsilon-greedy strategy
+        # Epsilon-greedy exploration
         if random.random() < self.epsilon:
-            # Exploration: take a random action
-            action = random.randint(0, 2)  # Random action (0: FOLD, 1: CALL, 2: RAISE)
+            action = random.randint(0, 2)  # Random action: 0 (fold), 1 (call), 2 (raise)
         else:
-            # Exploitation: take the best action based on the model
             action_probs = self.model(state_tensor)
             action = torch.argmax(action_probs, dim=1).item()
 
-        # Decay epsilon after each action
+        # Decay epsilon
         self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
-        # Map action index to ActionType
+        # Map action to ActionType
         action_type = [ActionType.FOLD, ActionType.CALL, ActionType.RAISE][action]
         action_params = {}
 
         if action_type == ActionType.RAISE:
             min_raise = self.game.min_raise()
             max_possible_raise = self.game.players[self.player_id].chips
-
-            # Ensure the raise is valid
-            raise_amount = max(self.game.big_blind * 2, min_raise)  # At least the min raise
-            raise_amount = min(raise_amount, max_possible_raise)  # No more than the player's chips
+            raise_amount = max(self.game.big_blind * 4, min_raise)
+            raise_amount = min(raise_amount, max_possible_raise)
 
             if raise_amount < min_raise:
-                action_type = ActionType.CALL  # If raise isn't valid, default to call or fold
-                action_params = {}
+                action_type = ActionType.CALL  # Default to CALL if raise is invalid
             else:
                 action_params["amount"] = raise_amount
 
@@ -217,25 +234,27 @@ class AIAdvisor:
             return self.preflop_hand_strength(hand)
         return self.monte_carlo_simulation(hand, board)
 
-    def monte_carlo_simulation(self, hand, board, simulations=50):
+    def monte_carlo_simulation(self, hand, board, simulations=100):
         wins = 0
         active_players = [
             player
             for player in self.game.players
             if player.state != LocalPlayerState.FOLDED
         ]
+
         num_active_players = len(active_players)
 
         for _ in range(simulations):
             game_copy = self.game.copy(shuffle=True)
             deck = game_copy.deck
-
             if deck is None or len(deck.cards) == 0:
                 deck = Deck()
                 deck.shuffle()
 
+            # Draw unknown cards to complete the board
             unknown_cards = deck.draw(5 - len(board))
             final_board = board + unknown_cards
+
             hands = {player.player_id: deck.draw(2) for player in active_players}
 
             our_rank = evaluate(hand, final_board)
@@ -244,17 +263,13 @@ class AIAdvisor:
                 for player in active_players
                 if player.player_id != self.player_id
             ]
-            try:
-                # Compare our hand rank to opponents' hands
-                if all(our_rank < opponent_rank for opponent_rank in opponent_ranks):
-                    wins += 1
-                elif any(our_rank == opponent_rank for opponent_rank in opponent_ranks):
-                    wins += 0.5  # Ties get half a win
-            except KeyError as e:
-                print(f"KeyError: {e} - Invalid card combination encountered.")
-                continue
 
-            return wins / simulations
+            if all(our_rank < opponent_rank for opponent_rank in opponent_ranks):
+                wins += 1
+            elif any(our_rank == opponent_rank for opponent_rank in opponent_ranks):
+                wins += 0.5  # Tied hands count as half a win
+
+        return wins / simulations
 
     def get_game_state(self):
         """
@@ -289,21 +304,17 @@ class AIAdvisor:
         board = self.game.board
         position = self.get_player_position()
 
-        # Evaluate hand strength
         hand_strength = self.evaluate_hand_strength(hand, board)
-
-        # Calculate Nash equilibrium-based strategy
         nash_action = self.calculate_nash_equilibrium(hand, board)
 
-        # Adjust strategy based on position (later positions are generally stronger)
+        # Adjust action based on position
         position_factor = (self.game.max_players - position) / self.game.max_players
         adjusted_strength = hand_strength * position_factor
 
-        # Decision-making logic based on hand strength and position
-        if nash_action == "RAISE" and adjusted_strength > 0.7:
+        if nash_action == ActionType.RAISE and adjusted_strength > 0.7:
             raise_amount = max(self.game.big_blind * 4, self.game.min_raise())
             return ActionType.RAISE, {"amount": raise_amount}
-        elif nash_action == "CALL" and adjusted_strength > 0.4:
+        elif nash_action == ActionType.CALL and adjusted_strength > 0.4:
             return ActionType.CALL, {}
         else:
             return ActionType.FOLD, {}
@@ -351,36 +362,6 @@ class AIAdvisor:
                 return ActionType.RAISE, {"amount": raise_amount}
         else:
             return ActionType.FOLD, {}
-
-    def should_have_folded(self, hand):
-        """
-        Returns True if the hand should have been folded based on its strength.
-        """
-        return self.preflop_hand_strength(hand) < 0.5
-
-    def train_rl_model(self, reward):
-        """
-        Updates the RL model based on the reward received from the outcome of the hand.
-        """
-        state = self.get_game_state()
-        state_tensor = torch.tensor(state, dtype=torch.float32)
-        action_probs = self.model(state_tensor)
-        action = torch.argmax(action_probs).item()
-
-        # Calculate the target Q-value
-        target = reward + 0.99 * torch.max(action_probs).item()
-
-        # Update the Q-values
-        expected_value = torch.zeros_like(action_probs)
-        expected_value[action] = target
-
-        # Calculate the loss
-        loss = self.loss_fn(action_probs, expected_value)
-
-        # Backpropagate the loss
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
 
     def preflop_hand_strength(self, hand):
         """
