@@ -8,9 +8,6 @@ This project is an AI-powered poker assistant built to play and simulate Texas H
 
 The project is structured into multiple components, which include the poker game mechanics, AI decision-making models, genetic algorithms for evolving the AI, and visualization tools for game analysis.
 
-bash
-
-Copy code
 
 `.
 ├── ai
@@ -41,9 +38,7 @@ To run this project, you'll need the following installed:
 
 Install dependencies using:
 
-bash
 
-Copy code
 
 `pip install -r requirements.txt`
 
@@ -51,9 +46,6 @@ Copy code
 
 You can start a game by running the following command:
 
-bash
-
-Copy code
 
 `python src/poker_game.py`
 
@@ -77,9 +69,6 @@ To avoid the AI getting stuck during decision-making, a **timeout mechanism** is
 
 To visualize the performance of the AI agents and the game results, you can use the `visualization.py` script. This generates plots like player chip counts, pot sizes, and more from the `game_log.csv` file:
 
-bash
-
-Copy code
 
 `python src/visualization.py`
 
